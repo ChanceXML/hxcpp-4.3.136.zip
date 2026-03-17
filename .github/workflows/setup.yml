@@ -1,0 +1,64 @@
+name: Source Code Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_version:
+        description: 'The tag version to download (e.g., v1.0.1)'
+        required: true
+        default: 'v1.0.1'
+      website:
+        description: 'Website URL (user-defined)'
+        required: true
+
+jobs:
+  download-and-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Show Inputs
+        run: |
+          echo "Tag Version: ${{ github.event.inputs.tag_version }}"
+          echo "Website: ${{ github.event.inputs.website }}"
+
+      - name: Download Release
+        run: |
+          TAG="${{ github.event.inputs.tag_version }}"
+          URL="https://github.com/CodenameCrew/CodenameEngine/archive/refs/tags/${TAG}.zip"
+          echo "Downloading release from: $URL"
+          curl -L -o source.zip "$URL"
+
+      - name: Extract and Merge (No Overwrite .github)
+        run: |
+          mkdir temp_extract
+          unzip source.zip -d temp_extract
+          
+          # Identify the internal folder (e.g., CodenameEngine-1.0.1)
+          SUB_DIR=$(ls -1 temp_extract | head -n 1)
+          
+          # Remove .github from downloaded source
+          if [ -d "temp_extract/$SUB_DIR/.github" ]; then
+            rm -rf "temp_extract/$SUB_DIR/.github"
+            echo "Removed .github from source to prevent collisions."
+          fi
+
+          # Merge files into repository root
+          echo "Merging files from $SUB_DIR into repository root..."
+          cp -a temp_extract/"$SUB_DIR"/. ./
+          
+          # Cleanup
+          rm -rf temp_extract
+          rm source.zip
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Merged source from tag ${{ github.event.inputs.tag_version }}" || echo "No changes"
+          git push
