@@ -29,7 +29,7 @@ jobs:
       - name: Download Release
         run: |
           TAG="${{ github.event.inputs.tag_version }}"
-          URL="https://github.com/CodenameCrew/CodenameEngine/archive/refs/tags/${TAG}.zip"
+          URL="https://github.com/HaxeFoundation/hxcpp/releases/tag/v4.3.135/${TAG}.zip"
           echo "Downloading release from: $URL"
           curl -L -o hxcpp-4.3.135.zip "$URL"
 
