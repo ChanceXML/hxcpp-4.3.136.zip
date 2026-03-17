@@ -1,64 +1,78 @@
-name: Source Code Sync
+name: GitHub Release Sync
 
 on:
   workflow_dispatch:
     inputs:
-      tag_version:
-        description: 'The tag version to download (e.g., v1.0.1)'
+      release_page:
+        description: 'GitHub release page URL (e.g., https://github.com/HaxeFoundation/hxcpp/releases/tag/v4.3.127)'
         required: true
-        default: 'v1.0.1'
-      website:
-        description: 'Website URL (user-defined)'
+      skip_folders:
+        description: 'Number of top-level folders to skip inside the ZIP before merging'
         required: true
+        default: '1'
 
 jobs:
-  download-and-sync:
+  sync-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write  # only write access for repo contents
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show Inputs
+      - name: Download release ZIP
         run: |
-          echo "Tag Version: ${{ github.event.inputs.tag_version }}"
-          echo "Website: ${{ github.event.inputs.website }}"
+          RELEASE_PAGE="${{ github.event.inputs.release_page }}"
+          SKIP=${{ github.event.inputs.skip_folders }}
 
-      - name: Download Release
-        run: |
-          TAG="${{ github.event.inputs.tag_version }}"
-          URL="https://github.com/HaxeFoundation/hxcpp/releases/tag/v4.3.135/${TAG}.zip"
-          echo "Downloading release from: $URL"
-          curl -L -o hxcpp-4.3.135.zip "$URL"
+          # Extract repo and tag from URL
+          REPO=$(echo "$RELEASE_PAGE" | awk -F'github.com/' '{print $2}' | awk -F'/releases/tag/' '{print $1}')
+          TAG=$(echo "$RELEASE_PAGE" | awk -F'/releases/tag/' '{print $2}')
 
-      - name: Extract and Merge (No Overwrite .github)
+          ZIP_URL="https://github.com/$REPO/archive/refs/tags/$TAG.zip"
+          ZIP_NAME="hxcpp-4.3.135.zip"
+
+          echo "Downloading source ZIP from $ZIP_URL ..."
+          curl -L -o "$ZIP_NAME" "$ZIP_URL"
+
+          if ! file "$ZIP_NAME" | grep -q 'Zip archive data'; then
+            echo "ERROR: Downloaded file is not a valid ZIP."
+            exit 1
+          fi
+
+      - name: Extract and merge
         run: |
           mkdir temp_extract
           unzip hxcpp-4.3.135.zip -d temp_extract
-          
-          # Identify the internal folder (e.g., CodenameEngine-1.0.1)
-          SUB_DIR=$(ls -1 temp_extract | head -n 1)
-          
-          # Remove .github from downloaded source
-          if [ -d "temp_extract/$SUB_DIR/.github" ]; then
-            rm -rf "temp_extract/$SUB_DIR/.github"
-            echo "Removed .github from source to prevent collisions."
-          fi
 
-          # Merge files into repository root
-          echo "Merging files from $SUB_DIR into repository root..."
-          cp -a temp_extract/"$SUB_DIR"/. ./
-          
-          # Cleanup
+          FOLDER="temp_extract"
+          for i in $(seq 1 $SKIP); do
+            SUBS=$(find "$FOLDER" -mindepth 1 -maxdepth 1 -type d)
+            if [ $(echo "$SUBS" | wc -l) -eq 1 ]; then
+              FOLDER="$SUBS"
+            else
+              break
+            fi
+          done
+
+          # Merge everything except .github
+          shopt -s dotglob
+          for f in "$FOLDER"/*; do
+            if [[ "$(basename "$f")" != ".github" ]]; then
+              cp -a "$f" ./
+            fi
+          done
+          shopt -u dotglob
+
           rm -rf temp_extract
           rm hxcpp-4.3.135.zip
 
-      - name: Commit and Push
+      - name: Commit & push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Merged source from tag ${{ github.event.inputs.tag_version }}" || echo "No changes"
+          git reset .github  # make sure .github is never added
+          git commit -m "Merged release from ${{ github.event.inputs.release_page }}" || echo "No changes"
           git push
